@@ -177,7 +177,7 @@
   .tag.unrel { border-color: color-mix(in srgb, var(--bad) 70%, transparent); color: var(--bad); }
   .tag.eq { border-style: dashed; }
 
-  /* Page viewer: the original and each result, drawn by one renderer, changed pixels marked. */
+  /* Page viewer: the original and each result, drawn by one renderer, changed areas boxed. */
   .viewer { margin-top: 20px; border-top: 1px solid var(--border); }
   .viewer-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 16px var(--pad) 0; }
   .pages { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -186,14 +186,17 @@
   .page-btn:hover { color: var(--text); border-color: var(--text); }
   .page-btn[aria-pressed="true"] { color: #0b0b0c; background: var(--text); border-color: var(--text); }
   .page-btn.changed::after { content: ""; position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
-  .toggle { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; color: var(--text-muted); font: 500 12px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; cursor: pointer; }
+  .viewer-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin-left: auto; }
+  .legend { display: inline-flex; flex-wrap: wrap; gap: 8px 16px; color: var(--text-muted); font: 500 11.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+  .legend i { display: inline-block; width: 11px; height: 11px; margin-right: 7px; border: 2px solid; border-radius: 2px; vertical-align: -1px; }
+  .toggle { display: inline-flex; align-items: center; gap: 10px; color: var(--text-muted); font: 500 12px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; cursor: pointer; }
   .toggle input { width: 16px; height: 16px; accent-color: var(--bad); }
   .panes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 var(--pad); padding: 18px var(--pad) 4px; }
   .pane { margin: 0; min-width: 0; }
   .pane figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 10px; }
   .pane figcaption .label { color: var(--text); }
   .sheet { display: block; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg-card); }
-  .sheet canvas { display: block; width: 100%; height: auto; }
+  .sheet canvas { display: block; width: 100%; height: auto; cursor: pointer; -webkit-touch-callout: none; user-select: none; }
   .sheet .empty { display: grid; place-items: center; aspect-ratio: 4 / 3; padding: 20px; color: var(--text-muted); font-size: 14px; text-align: center; }
   .pane-note { margin-top: 10px; color: var(--text-muted); font-size: 14px; line-height: 1.45; }
   .pane-note strong { color: var(--text); font-weight: 600; }
@@ -525,39 +528,65 @@ function pixels(url) {
   return pixelCache.get(url);
 }
 
-const TILE = 16;
+// Comparing pages runs in workers (assets/pagediff.js): rows and columns of ink are aligned
+// first, so a row that grew moves what is below it instead of marking it, and what is left is
+// grouped into boxes of changed content, changed color, or moved content.
+const diffWorkers = [], diffJobs = new Map();
+let diffSeq = 0;
 function compare(a, b) {
-  const { width: w, height: h } = b;
-  const tiles = new Set();
-  let changed = 0;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const i = (y * w + x) * 4;
-    let d = 765;
-    if (x < a.width && y < a.height) {
-      const j = (y * a.width + x) * 4;
-      d = Math.abs(a.data[j] - b.data[i]) + Math.abs(a.data[j + 1] - b.data[i + 1]) + Math.abs(a.data[j + 2] - b.data[i + 2]);
+  if (!diffWorkers.length) {
+    const n = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+    for (let i = 0; i < n; i++) {
+      const w = new Worker("/assets/pagediff.js");
+      w.jobs = 0;
+      w.onmessage = ({ data }) => {
+        const job = diffJobs.get(data.id);
+        if (!job) return;
+        diffJobs.delete(data.id); w.jobs--;
+        data.error ? job.fail(new Error(data.error)) : job.ok(data.diff);
+      };
+      w.onerror = (e) => {
+        for (const [id, job] of diffJobs) if (job.w === w) { diffJobs.delete(id); job.fail(new Error(e.message || "page comparison failed")); }
+        w.jobs = 0;
+      };
+      diffWorkers.push(w);
     }
-    if (d > 24) { changed++; tiles.add(((y / TILE) | 0) * 100000 + ((x / TILE) | 0)); }
   }
-  return { changed, ratio: changed / (w * h), tiles, resized: a.width !== w || a.height !== h };
+  const w = diffWorkers.reduce((p, q) => q.jobs < p.jobs ? q : p), id = ++diffSeq;
+  w.jobs++;
+  return new Promise((ok, fail) => { diffJobs.set(id, { ok, fail, w }); w.postMessage({ id, a, b }); });
 }
 
+const KINDS = { content: { color: "#ff4d3d", label: "Changed" }, color: { color: "#f5a524", label: "Recolored" }, moved: { color: "#3b8bff", label: "Moved" } };
 function paint(canvas, img, diff, highlight) {
   canvas.width = img.width; canvas.height = img.height;
   const ctx = canvas.getContext("2d");
   ctx.putImageData(img, 0, 0);
-  if (!highlight || !diff || !diff.changed) return;
-  ctx.fillStyle = "rgba(5, 5, 6, 0.55)";
-  ctx.fillRect(0, 0, img.width, img.height);
-  for (const t of diff.tiles) {
-    const x = (t % 100000) * TILE, y = Math.floor(t / 100000) * TILE;
-    ctx.putImageData(img, 0, 0, x, y, TILE, TILE);
-    ctx.fillStyle = "rgba(255, 107, 94, 0.28)";
-    ctx.fillRect(x, y, TILE, TILE);
+  if (!highlight || !diff || !diff.regions || !diff.regions.length) return;
+  const line = Math.max(2, Math.round(img.width / 320)), pad = line + 2;
+  ctx.lineWidth = line;
+  for (const r of diff.regions) {
+    const x = r.x - pad, y = r.y - pad, w = r.w + 2 * pad, h = r.h + 2 * pad;
+    ctx.globalAlpha = 0.14; ctx.fillStyle = KINDS[r.kind].color; ctx.fillRect(x, y, w, h);
+    ctx.globalAlpha = 1; ctx.strokeStyle = KINDS[r.kind].color; ctx.strokeRect(x, y, w, h);
   }
 }
 
-const amount = (d) => d.ratio < 0.0001 ? `${d.changed.toLocaleString("en-US")} pixel${d.changed === 1 ? "" : "s"} differ${d.changed === 1 ? "s" : ""}` : `${(d.ratio * 100).toFixed(d.ratio < 0.01 ? 2 : 1)}% of the page differs`;
+const SHIFT = 2;
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const visible = (d) => d.regions.length > 0 || d.resized || d.shift > SHIFT;
+function summary(d) {
+  const n = { content: 0, color: 0, moved: 0 };
+  for (const r of d.regions) n[r.kind]++;
+  const out = [];
+  if (n.content) out.push(`<strong>${plural(n.content, "area", "areas")} changed.</strong>`);
+  if (n.color) out.push(`<strong>Color differs in ${plural(n.color, "place", "places")}.</strong>`);
+  if (n.moved) out.push(`<strong>${plural(n.moved, "area", "areas")} moved.</strong>`);
+  if (d.resized) out.push("<strong>The page size changed.</strong>");
+  if (!out.length) out.push(d.pixels === undefined ? "<strong>Same pixels</strong> as the original." : "<strong>No visible change</strong> from the original.");
+  if (d.shift > SHIFT) out.push(`Layout shifted up to ${d.shift} px.`);
+  return out.join(" ");
+}
 
 function marks(before, after) {
   if (after === null) return '<span class="num of">no result</span>';
@@ -595,23 +624,26 @@ async function viewer(el, original, arms, label, edit = false) {
   }
   const shown = arms.filter((a) => a.saved);
   const pages = original.map((_, i) => i);
+  const gen = el.dataset.gen = String(Number(el.dataset.gen || 0) + 1);
+  el.innerHTML = `<p class="viewer-note">Comparing pages.</p>`;
   // Compare every page up front: mark pages with a change and open the first one.
   const diffs = await Promise.all(pages.map((p) => Promise.all(shown.map(async (a) => {
     if (!a.preview[p]) return { missing: true };
-    try { return compare(await pixels(original[p]), await pixels(a.preview[p])); } catch { return { missing: true }; }
+    try { return await compare(await pixels(original[p]), await pixels(a.preview[p])); } catch { return { missing: true }; }
   }))));
-  const changedPage = (p) => diffs[p].some((d) => d.missing || d.changed);
+  if (el.dataset.gen !== gen) return;
+  const changedPage = (p) => diffs[p].some((d) => d.missing || visible(d));
   let page = Math.max(0, pages.findIndex(changedPage));
   const id = el.id;
   el.innerHTML = `<div class="viewer-bar">
       <div class="pages" role="group" aria-label="${esc(label)} pages"${original.length > 1 ? "" : " hidden"}>${pages.map((p) => `<button type="button" class="page-btn${changedPage(p) ? " changed" : ""}" data-page="${p}" aria-pressed="false" title="${changedPage(p) ? "Something on this page changed" : "No visible change on this page"}">Page ${p + 1}</button>`).join("")}</div>
-      <label class="toggle"><input type="checkbox" id="${id}-hl" checked> Highlight changes</label>
+      <div class="viewer-tools"><span class="legend" aria-hidden="true">${Object.values(KINDS).map((k) => `<span><i style="color:${k.color}"></i>${k.label}</span>`).join("")}</span><label class="toggle"><input type="checkbox" id="${id}-hl" checked> Highlight changes</label></div>
     </div>
     <div class="panes">
       <figure class="pane"><figcaption><span class="label">Original</span><a class="link" id="${id}-o-open" target="_blank" rel="noopener">Full size</a></figcaption><div class="sheet"><canvas id="${id}-o"></canvas></div><p class="pane-note">As uploaded.</p></figure>
       ${shown.map((a, k) => `<figure class="pane"><figcaption><span class="label">${esc(shortName(a.label))}</span><a class="link" id="${id}-${k}-open" target="_blank" rel="noopener">Full size</a></figcaption><div class="sheet" id="${id}-${k}-sheet"></div><p class="pane-note" id="${id}-${k}-note"></p></figure>`).join("")}
     </div>
-    <p class="viewer-note">${edit ? "The edit should change the replaced text and nothing else. " : "A save with no edit should change nothing. "}Every column is drawn by WolfRender, the renderer inside WolfSDK, at the same size, so a marked area is a change in the file itself. ${original.length >= 4 ? "First four pages shown. " : ""}Download a result below to open it in Office.</p>`;
+    <p class="viewer-note">${edit ? "The edit should change the replaced text and nothing else. " : "A save with no edit should change nothing. "}Every column is drawn by WolfRender, the renderer inside WolfSDK, at the same size, so a marked area is a change in the file itself. Rows and columns are lined up before comparing, so a row that grew marks that row, not everything below it. Press and hold a result to see the original in its place. ${original.length >= 4 ? "First four pages shown. " : ""}Download a result below to open it in Office.</p>`;
   const draw = async () => {
     const hl = $(`${id}-hl`).checked;
     for (const b of el.querySelectorAll(".page-btn")) b.setAttribute("aria-pressed", String(Number(b.dataset.page) === page));
@@ -627,11 +659,13 @@ async function viewer(el, original, arms, label, edit = false) {
       }
       open.hidden = false; open.href = a.preview[page];
       if (!sheet.firstElementChild || sheet.firstElementChild.tagName !== "CANVAS") sheet.innerHTML = "<canvas></canvas>";
-      paint(sheet.firstElementChild, await pixels(a.preview[page]), d, hl);
-      note.className = d.changed && !edit ? "pane-note bad" : "pane-note";
-      note.innerHTML = d.changed
-        ? `<strong>${amount(d)}</strong> from the original${d.resized ? ", and the page size changed" : ""}.`
-        : "<strong>Same pixels</strong> as the original.";
+      const canvas = sheet.firstElementChild, img = await pixels(a.preview[page]);
+      paint(canvas, img, d, hl);
+      canvas.title = "Press and hold to see the original";
+      canvas.onpointerdown = (e) => { canvas.setPointerCapture(e.pointerId); paint(canvas, base, null, false); };
+      canvas.onlostpointercapture = () => paint(canvas, img, d, $(`${id}-hl`).checked);
+      note.className = visible(d) && !edit ? "pane-note bad" : "pane-note";
+      note.innerHTML = summary(d);
     }
   };
   for (const b of el.querySelectorAll(".page-btn")) b.onclick = () => { page = Number(b.dataset.page); draw(); };
