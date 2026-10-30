@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import mimetypes
 import os
@@ -17,7 +18,12 @@ from pathlib import Path
 
 import anyio
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+)
 from fastapi.staticfiles import StaticFiles
 
 from . import runner, verify
@@ -69,7 +75,8 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-# Fonts and the hero poster, copied from the wolfsdk.com site so the demo shares its look.
+# Fonts, the hero poster (copied from the wolfsdk.com site so the demo shares its look) and the
+# page-diff worker.
 # The slim image has no /etc/mime.types, so name the two asset types explicitly.
 mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("image/webp", ".webp")
@@ -116,9 +123,19 @@ def scrub(result: dict, work: Path, run_id: str) -> dict:
     return result
 
 
+WORKER = '"/assets/pagediff.js"'
+
+
 @app.get("/")
 async def index():
-    return FileResponse(ROOT / "static" / "index.html", headers={"Cache-Control": "no-cache"})
+    # The CDN caches /assets for hours, so the page asks for the worker by its content hash and a
+    # deploy reaches visitors at once.
+    static = ROOT / "static"
+    page = (static / "index.html").read_text()
+    if WORKER not in page:
+        raise RuntimeError(f"index.html no longer loads the worker as {WORKER}")
+    digest = hashlib.sha256((static / "assets" / "pagediff.js").read_bytes()).hexdigest()[:12]
+    return HTMLResponse(page.replace(WORKER, f'"/assets/pagediff.js?v={digest}"'), headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/healthz")
