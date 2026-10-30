@@ -13,9 +13,10 @@ so anyone can recheck a downloaded result.
 
 The page also shows the first four pages of the original and of every result, all drawn by
 `wolf render --to png` (WolfRender) at 96 dpi, and boxes what differs from the original in the
-browser. `app/static/assets/pagediff.js` runs in Web Workers: it lines up rows and columns of ink
-first, so a row that grew does not mark everything below it, then boxes each remaining difference
-as changed content, changed color, or moved content. One renderer draws every column, so a boxed
+browser. `app/static/assets/pagediff.js` runs in Web Workers: it lines up rows of ink first, so
+a row that grew does not mark everything below it, then lines up columns within each band of
+rows, so a centered title that grew does not shift the text under it. It boxes each remaining
+difference as changed content, changed color, or moved content. One renderer draws every column, so a boxed
 area is a change in the file, not in the viewer. `PREVIEW_PAGES`, `PREVIEW_DPI` and
 `PREVIEW_WORKERS` tune it. The Python-library card
 shows the `app/baselines.py` functions that ran. Under each set of pages, `app/inventory.py`

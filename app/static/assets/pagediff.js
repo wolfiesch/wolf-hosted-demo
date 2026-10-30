@@ -1,10 +1,12 @@
-// Page diff that survives layout drift. Rows and columns of ink are aligned first (a banded
-// edit-distance alignment), so a row that grew by a pixel moves everything below it without
-// marking it. Aligned pixels are then compared with a one-pixel window in both directions, on
-// lightly blurred brightness so anti-aliasing noise from sub-pixel shifts does not count.
-// What is left is grouped into boxes: "color" where both pages have the same shape in another
-// color, "moved" where the box's content sits nearby in the original, "content" otherwise.
-const INK = 200, LUM = 40, HUE = 90, SHARE = 0.85, BAND = 96, CELL = 8, REACH = 24, RULE = 16, JOIN = 24, MOVED_INK = 40;
+// Page diff that survives layout drift. Rows of ink are aligned first (a banded edit-distance
+// alignment), so a row that grew by a pixel moves everything below it without marking it; then
+// columns are aligned the same way within each band of rows, so a line whose text moved
+// sideways does not shift the lines around it. Aligned pixels are then compared with a
+// one-pixel window in both directions, on lightly blurred brightness so anti-aliasing noise
+// from sub-pixel shifts does not count. What is left is grouped into boxes: "color" where both
+// pages have the same shape in another color, "moved" where the box's content sits nearby in
+// the original, "content" otherwise.
+const INK = 200, LUM = 40, HUE = 90, SHARE = 0.85, BAND = 96, BAND_COLS = 256, CELL = 8, REACH = 24, RULE = 16, JOIN = 24, MOVED_INK = 40;
 
 function luma(img) {
   const { data, width, height } = img, out = new Uint8Array(width * height);
@@ -66,10 +68,11 @@ function signatures(lum, w, h, byColumn) {
 
 function popcount(v) { v -= (v >>> 1) & 0x55555555; v = (v & 0x33333333) + ((v >>> 2) & 0x33333333); return (((v + (v >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24; }
 
-// Returns map[j] = matching line in A for line j of B, or -1 for a line B inserted.
-function align(A, B) {
+// Returns map[j] = matching line in A for line j of B, or -1 for a line B inserted. Lines may
+// drift up to `reach` apart.
+function align(A, B, reach = BAND) {
   const n = A.n, m = B.n, words = Math.min(A.words, B.words);
-  const lo = Math.min(0, m - n) - BAND, hi = Math.max(0, m - n) + BAND, span = hi - lo + 1;
+  const lo = Math.min(0, m - n) - reach, hi = Math.max(0, m - n) + reach, span = hi - lo + 1;
   const INF = 1e15, cost = new Float64Array((n + 1) * span).fill(INF), step = new Uint8Array((n + 1) * span);
   const at = (i, j) => { const k = j - i - lo; return k < 0 || k >= span ? -1 : i * span + k; };
   const mismatch = (i, j) => lineMismatch(A, i, B, j);
@@ -120,14 +123,40 @@ function fill(map, S, D) {
   return out;
 }
 
-// The other page, resampled into this page's frame through the line maps.
+// The other page, resampled into this page's frame through the line maps. Column maps are per
+// row: mapX[y] is the column map of the band that row y belongs to.
 function warp(px, dw, mapX, mapY) {
-  const w = mapX.length, h = mapY.length, out = new Uint8ClampedArray(w * h * 4);
+  const w = mapX[0].length, h = mapY.length, out = new Uint8ClampedArray(w * h * 4);
   for (let y = 0; y < h; y++) {
-    const row = mapY[y] * dw;
-    for (let x = 0; x < w; x++) { const s = (row + mapX[x]) * 4, d = (y * w + x) * 4; out[d] = px[s]; out[d + 1] = px[s + 1]; out[d + 2] = px[s + 2]; out[d + 3] = 255; }
+    const row = mapY[y] * dw, cols = mapX[y];
+    for (let x = 0; x < w; x++) { const s = (row + cols[x]) * 4, d = (y * w + x) * 4; out[d] = px[s]; out[d + 1] = px[s + 1]; out[d + 2] = px[s + 2]; out[d + 3] = 255; }
   }
   return out;
+}
+
+// Rows of this page (and their partners on the other page) that carry ink, in runs separated
+// by blank rows. Each run is a band: a title, a paragraph line, a whole ruled table.
+function bands(sigB, sigA, rowB2A) {
+  const out = [];
+  for (let j = 0, start = -1; j <= sigB.n; j++) {
+    const inked = j < sigB.n && (sigB.count[j] > 0 || sigA.count[rowB2A[j]] > 0);
+    if (inked && start < 0) start = j;
+    if (!inked && start >= 0) { out.push({ b0: start, b1: j - 1 }); start = -1; }
+  }
+  return out;
+}
+
+// Align rows b0..b1 of this page again against rows a0..a1 of the other page, with the other
+// page's columns first moved through mapX, and write the result into the row maps.
+function realignRows(la, wa, lb, wb, b0, b1, a0, a1, mapX, rowB2A, rowA2B) {
+  const ah = a1 - a0 + 1, bh = b1 - b0 + 1, moved = new Uint8Array(ah * wb);
+  for (let i = 0; i < ah; i++) { const src = (a0 + i) * wa, dst = i * wb; for (let x = 0; x < wb; x++) moved[dst + x] = la[src + mapX[x]]; }
+  const sigA = signatures(moved, wb, ah, false), sigB = signatures(lb.subarray(b0 * wb, (b1 + 1) * wb), wb, bh, false);
+  const rows = align(sigA, sigB);
+  if (!rows) return;
+  const b2a = fill(rows.map, sigB, sigA), a2b = fill(rows.back, sigA, sigB);
+  for (let j = 0; j < bh; j++) rowB2A[b0 + j] = a0 + b2a[j];
+  for (let i = 0; i < ah; i++) rowA2B[a0 + i] = b0 + a2b[i];
 }
 
 function compare(a, b) {
@@ -141,15 +170,52 @@ function compare(a, b) {
   const la = luma(a), lb = luma(b);
   const rowSigA = signatures(la, wa, ha, false), rowSigB = signatures(lb, wb, hb, false);
   const colSigA = signatures(la, wa, ha, true), colSigB = signatures(lb, wb, hb, true);
-  const rows = align(rowSigA, rowSigB), cols = align(colSigA, colSigB);
   const identity = (n, m) => { const map = new Int32Array(m); for (let j = 0; j < m; j++) map[j] = j < n ? j : -1; const back = new Int32Array(n); for (let i = 0; i < n; i++) back[i] = i < m ? i : -1; return { map, back }; };
-  const R = rows || identity(ha, hb), C = cols || identity(wa, wb);
-  const rowB2A = fill(R.map, rowSigB, rowSigA), colB2A = fill(C.map, colSigB, colSigA);
-  const rowA2B = fill(R.back, rowSigA, rowSigB), colA2B = fill(C.back, colSigA, colSigB);
+  const R = align(rowSigA, rowSigB) || identity(ha, hb);
+  const rowB2A = fill(R.map, rowSigB, rowSigA), rowA2B = fill(R.back, rowSigA, rowSigB);
+
+  // Columns are aligned band by band, so text that moved sideways on one line (a centered title
+  // that grew) does not drag the columns of every other line with it. A band keeps columns in
+  // place when its ink already matches there, else takes the whole-page alignment when that
+  // matches, else gets its own. Columns in place come first: ink decides the alignment, but
+  // light fills (table cells, shading) are not ink, and an alignment that slid their blank
+  // columns would mark their edges. Rows outside every band carry no ink and stay in place.
+  const C = align(colSigA, colSigB) || identity(wa, wb);
+  const whole = { map: C.map, b2a: fill(C.map, colSigB, colSigA), a2b: fill(C.back, colSigA, colSigB) };
+  const inPlace = wa === wb ? { map: Int32Array.from({ length: wb }, (_, x) => x) } : null;
+  if (inPlace) inPlace.b2a = inPlace.a2b = inPlace.map;
+  const outside = inPlace || whole;
+  const colB2A = new Array(hb).fill(outside.b2a), colA2B = new Array(ha).fill(outside.a2b);
+  const strips = bands(rowSigB, rowSigA, rowB2A);
+  for (const band of strips) {
+    const rows = band.b1 - band.b0 + 1;
+    // The other page's rows for this band, in this band's row order, so bits line up.
+    const partner = new Uint8Array(rows * wa);
+    let a0 = ha, a1 = -1;
+    for (let j = band.b0; j <= band.b1; j++) {
+      const i = rowB2A[j];
+      partner.set(la.subarray(i * wa, (i + 1) * wa), (j - band.b0) * wa);
+      a0 = Math.min(a0, i); a1 = Math.max(a1, i);
+    }
+    const sigB = signatures(lb.subarray(band.b0 * wb, (band.b1 + 1) * wb), wb, rows, true);
+    const sigA = signatures(partner, wa, rows, true);
+    const fits = (m) => { for (let x = 0; x < wb; x++) if (lineMismatch(sigA, m.b2a[x], sigB, x)) return false; return true; };
+    let cols = [inPlace, whole].find((m) => m && fits(m));
+    if (!cols) {
+      const own = align(sigA, sigB, BAND_COLS);
+      cols = own ? { map: own.map, b2a: fill(own.map, sigB, sigA), a2b: fill(own.back, sigA, sigB) } : whole;
+      // The rows of this band were aligned while its text sat at different columns, so their
+      // ink barely overlapped. Align them again with the other page's columns moved into place.
+      if (own) realignRows(la, wa, lb, wb, band.b0, band.b1, a0, a1, cols.b2a, rowB2A, rowA2B);
+    }
+    band.shift = 0;
+    for (let x = 0; x < wb; x++) if (sigB.count[x] && cols.map[x] >= 0) band.shift = Math.max(band.shift, Math.abs(x - cols.map[x]));
+    for (let j = band.b0; j <= band.b1; j++) colB2A[j] = cols.b2a;
+    for (let i = a0; i <= a1; i++) colA2B[i] = cols.a2b;
+  }
 
   let shift = 0;
   for (let j = 0; j < hb; j++) if (R.map[j] >= 0) shift = Math.max(shift, Math.abs(j - R.map[j]));
-  for (let j = 0; j < wb; j++) if (C.map[j] >= 0) shift = Math.max(shift, Math.abs(j - C.map[j]));
 
   // Each page is compared against the other page warped into its own frame, so the blur that
   // absorbs anti-aliasing never mixes rows the alignment pulled apart. Shape is measured as
@@ -199,18 +265,25 @@ function compare(a, b) {
   const changedA = diff(view(a.data, wa, ha), view(warp(b.data, wb, colA2B, rowA2B), wa, ha));
   const mark = new Uint8Array(wb * hb);
   for (let p = 0; p < wb * hb; p++) if (changedB[p]) mark[p] = 1;
-  for (let y = 0; y < ha; y++) for (let x = 0; x < wa; x++) if (changedA[y * wa + x]) mark[rowA2B[y] * wb + colA2B[x]] = 1;
+  for (let y = 0; y < ha; y++) { const cols = colA2B[y], row = rowA2B[y] * wb; for (let x = 0; x < wa; x++) if (changedA[y * wa + x]) mark[row + cols[x]] = 1; }
 
   const found = regions(mark, wb, hb);
   for (const r of found.regions) {
     // The changed pixels of each page inside this box, in their own page's coordinates.
-    const ax0 = colB2A[r.x], ay0 = rowB2A[r.y], ax1 = colB2A[r.x + r.w - 1], ay1 = rowB2A[r.y + r.h - 1];
+    let ax0 = wa, ax1 = -1;
+    for (let y = r.y; y < r.y + r.h; y++) { ax0 = Math.min(ax0, colB2A[y][r.x]); ax1 = Math.max(ax1, colB2A[y][r.x + r.w - 1]); }
+    const ay0 = rowB2A[r.y], ay1 = rowB2A[r.y + r.h - 1];
     const inB = [], inA = [];
     let hue = 0, all = 0;
     for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) { const v = changedB[y * wb + x]; if (v) { inB.push(x, y); all++; if (v === 1) hue++; } }
     for (let y = Math.max(0, ay0); y <= ay1; y++) for (let x = Math.max(0, ax0); x <= ax1; x++) { const v = changedA[y * wa + x]; if (v) { inA.push(x, y); all++; if (v === 1) hue++; } }
     r.kind = hue >= all * 0.5 ? "color"
       : movedBy(inB, lb, wb, la, wa, ha, colB2A, rowB2A, inA, lb, wb, hb, la, wa, colA2B, rowA2B) ? "moved" : "content";
+  }
+  // A band whose text changed moves sideways because of the change; that is not a layout shift.
+  for (const band of strips) {
+    if (found.regions.some((r) => r.kind === "content" && r.y <= band.b1 && r.y + r.h > band.b0)) continue;
+    shift = Math.max(shift, band.shift || 0);
   }
   return { ...found, regions: joinLines(found.regions), shift, resized };
 }
@@ -245,7 +318,7 @@ function movedBy(ptsB, lb, wb, la, wa, ha, colB2A, rowB2A, ptsA, lb2, wb2, hb, l
     let hit = 0;
     const n = pts.length / 2, need = n * SHARE;
     for (let i = 0; i < pts.length; i += 2) {
-      const xx = mapX[pts[i]] + dx, yy = mapY[pts[i + 1]] + dy;
+      const xx = mapX[pts[i + 1]][pts[i]] + dx, yy = mapY[pts[i + 1]] + dy;
       if (xx >= 0 && yy >= 0 && xx < dw && yy < dh && dl[yy * dw + xx] < INK) hit++;
       else if (i / 2 - hit > n - need) return false;
     }
