@@ -1,0 +1,6 @@
+.venv
+.git
+bin/wolf
+bin/SHA256SUMS
+__pycache__
+**/__pycache__

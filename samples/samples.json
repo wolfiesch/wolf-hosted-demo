@@ -1,0 +1,42 @@
+[
+  {
+    "file": "uk-emissions-template.xlsx",
+    "title": "UK government emissions template (XLSX)",
+    "has": "Excel-authored workbook with formulas, custom XML parts, document properties, printer settings",
+    "find": "Transition costs",
+    "replace": "One-off transition costs",
+    "source": "https://www.gov.uk/government/publications/valuation-of-energy-use-and-greenhouse-gas-emissions-for-appraisal",
+    "license": "Contains public sector information licensed under the Open Government Licence v3.0",
+    "sha256": "5f14820c99a8460213958fb42c51ac804b22b8d48e9f80cb7d13e7f6d5d2563e"
+  },
+  {
+    "file": "master-services-agreement.docx",
+    "title": "Master services agreement (DOCX)",
+    "has": "tracked changes, threaded comments, multilevel numbering, headers and footers, footnote, content controls, custom XML",
+    "find": "30 days",
+    "replace": "45 days",
+    "source": "Authored for this demo; invented text",
+    "license": "Free to reuse",
+    "sha256": "ee42a6373de9e3ed0739d78ba71ab5fdb23bc857499e647aa38903bc82aee07b"
+  },
+  {
+    "file": "modern-comments-deck.pptx",
+    "title": "Review deck with modern comments (PPTX)",
+    "has": "modern threaded comments, comment authors, thumbnail",
+    "find": "Quarterly review",
+    "replace": "Quarterly business review",
+    "source": "Authored for this demo",
+    "license": "Free to reuse",
+    "sha256": "1433141f3dd6932abe2f3d6551a6955b150e9b2e529faa15095f85e56aed7bd4"
+  },
+  {
+    "file": "chart-table-deck.pptx",
+    "title": "Pipeline deck with chart and table (PPTX)",
+    "has": "native chart with embedded workbook, chart styles, table, extension lists",
+    "find": "Pipeline by stage",
+    "replace": "Pipeline by sales stage",
+    "source": "Authored for this demo",
+    "license": "Free to reuse",
+    "sha256": "e351bcdfc9f1d5c8f6445eff619d613de0b0a185aae735ceef101f2a69b8c24e"
+  }
+]

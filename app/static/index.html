@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What survives a save? | WolfSDK</title>
+<meta name="description" content="Upload an XLSX, DOCX or PPTX. See which parts survive a save and a one-line edit with WolfSDK, LibreOffice, openpyxl, python-docx and python-pptx.">
+<meta name="theme-color" content="#050506">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='350 184 545 670'%3E%3Cg fill='%23eef1f5'%3E%3Cpath d='M480 216 L639 400 L639 478 L520 552 L598 821 L382 578 L434 476 Z'/%3E%3Cpath d='M817 216 L660 353 L808 439 Z'/%3E%3Cpath d='M652 365 L808 458 L824 537 L813 605 L863 753 L827 785 L783 785 L547 551 L652 485 Z'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preload" href="/assets/archivo-variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  /* Archivo and JetBrains Mono, both SIL OFL 1.1 (/assets/*-OFL.txt), as on wolfsdk.com. */
+  @font-face { font-family: "Archivo"; src: url(/assets/archivo-variable.woff2) format("woff2"); font-weight: 100 900; font-stretch: 62% 125%; font-display: swap; }
+  @font-face { font-family: "JetBrains Mono"; src: url(/assets/jetbrains-mono-latin.woff2) format("woff2"); font-weight: 100 800; font-display: swap; }
+
+  /* Tokens mirror engines/wolfxl/www/app/globals.css (suite site). */
+  :root {
+    --bg: #050506; --bg-card: #0d0d0e; --text: #eef1f5; --text-muted: #9a9aa0;
+    --border: rgba(238, 241, 245, 0.13); --border-strong: rgba(238, 241, 245, 0.3);
+    --code-bg: #111113; --accent: #eef1f5; --accent-hover: color-mix(in oklab, #eef1f5 80%, #fff);
+    --site-rule: linear-gradient(90deg, var(--text), var(--text-muted));
+    --fmt-docx: #4c9bff; --fmt-xl: #3fcf7f; --fmt-ppt: #f97316;
+    --bad: #ff6b5e;
+    --pad: clamp(16px, 2.2vw, 32px); --bar: 66px; --section: clamp(72px, 8vw, 128px); --radius: 14px;
+    --sans: "Archivo", ui-sans-serif, system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); scroll-behavior: smooth; }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  h1, h2, h3, p, dl, dd, pre { margin: 0; }
+  h1, h2 { font-stretch: 115%; letter-spacing: -0.04em; line-height: 1.02; font-weight: 700; }
+  h1 em, h2 em { font-style: normal; color: var(--text-muted); }
+  h3 { font-stretch: 108%; letter-spacing: -0.02em; line-height: 1.2; }
+  a { color: inherit; text-decoration: none; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  ::selection { background: color-mix(in oklab, var(--text) 32%, transparent); }
+  code, pre, kbd { font-family: var(--mono); font-variant-ligatures: none; }
+  [hidden] { display: none !important; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* Shared type: mono caps labels, pill buttons, ruled links. */
+  .eyebrow, .label { color: var(--text-muted); font: 500 12px/1.45 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 12px 24px;
+    border: 0; border-radius: 999px; font: 500 13px/1.2 var(--mono); letter-spacing: 0.07em; text-transform: uppercase;
+    cursor: pointer; transition: background-color .2s, box-shadow .2s, opacity .2s; }
+  .btn-sm { min-height: 40px; padding: 8px 18px; font-size: 12px; }
+  .btn-primary { background: var(--accent); color: #0b0b0c; font-weight: 600;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 8px 24px -10px color-mix(in srgb, var(--accent) 60%, transparent); }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-secondary { background: transparent; color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong); }
+  .btn-secondary:hover { background: rgba(238,241,245,.06); box-shadow: inset 0 0 0 1px var(--text); }
+  .btn:disabled { opacity: .5; cursor: progress; }
+  .link { display: inline-flex; align-items: center; gap: 8px; padding-bottom: 4px; border-bottom: 1px solid currentColor;
+    font: 500 12px/1.35 var(--mono); letter-spacing: 0.07em; text-transform: uppercase; }
+  .link:hover { border-image: var(--site-rule) 1; }
+  .prose a { text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--border-strong); }
+  .prose a:hover { text-decoration-color: var(--text); }
+  .prose code { font-size: .9em; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .dot.xlsx { background: var(--fmt-xl); } .dot.docx { background: var(--fmt-docx); } .dot.pptx { background: var(--fmt-ppt); }
+
+  /* Chrome */
+  .bar { position: sticky; top: 0; z-index: 50; background: var(--bg); border-bottom: 1px solid transparent; border-image: var(--site-rule) 1; }
+  .bar-in { display: flex; align-items: center; justify-content: space-between; gap: 24px; height: var(--bar); padding: 0 var(--pad); }
+  .logo { display: inline-flex; align-items: center; gap: 10px; height: 28px; font: 800 22px/1 var(--sans); font-stretch: 112%; letter-spacing: -0.03em; white-space: nowrap; }
+  .logo svg { height: 100%; width: auto; fill: var(--accent); }
+  .nav { display: flex; align-items: center; gap: 20px; color: var(--text-muted); font: 500 12px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+  .nav a:not(.btn) { display: inline-flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid transparent; transition: color .2s, border-color .2s; }
+  .nav a:not(.btn):hover { color: var(--text); border-bottom-color: currentColor; }
+  @media (max-width: 1020px) { .nav a:not(.btn) { display: none; } }
+
+  /* Four quarter lines, as on the site; one column under 860px. */
+  .quarters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .quarters > * { min-width: 0; padding-left: var(--pad); padding-right: var(--pad); }
+  .span-2 { grid-column: span 2; } .span-3 { grid-column: span 3; } .span-all { grid-column: 1 / -1; }
+
+  /* Hero */
+  .hero { position: relative; isolation: isolate; row-gap: clamp(22px, 2.4vw, 36px);
+    padding-top: clamp(56px, 7vw, 120px); padding-bottom: clamp(48px, 6vw, 96px); overflow: hidden; }
+  .hero > .scene { position: absolute; inset: 0; z-index: -1; padding: 0;
+    background: url(/assets/suite-hero.webp) center / cover no-repeat;
+    mask-image: linear-gradient(to bottom, #000 30%, transparent), linear-gradient(to right, rgb(0 0 0 / .1), rgb(0 0 0 / .3) 45%, #000 85%);
+    mask-composite: intersect; -webkit-mask-composite: source-in; opacity: .85; }
+  .hero h1 { grid-column: 1 / 4; font-size: clamp(42px, 5.6vw, 96px); letter-spacing: -0.045em; line-height: 1; }
+  .hero .lede { grid-column: 1 / 3; }
+  .lede { max-width: 640px; color: var(--text-muted); font-size: clamp(18px, 1.5vw, 21px); line-height: 1.5; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 26px; }
+
+  /* Signal cells: label over value, hairline rules. */
+  .cells { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .cells > div { display: flex; flex-direction: column; gap: clamp(16px, 2vw, 28px); padding-top: 22px; padding-bottom: 26px; border-left: 1px solid var(--border); }
+  .cells > div:first-child { border-left: 0; }
+  .cell-value { font-size: clamp(19px, 1.6vw, 24px); font-weight: 600; font-stretch: 110%; letter-spacing: -0.03em; line-height: 1.15; }
+  .cell-note { margin-top: 6px; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
+
+  /* Section heads */
+  .section-head { padding-top: var(--section); padding-bottom: clamp(32px, 4vw, 56px); row-gap: 20px; align-items: end; }
+  .section-head > :first-child { grid-column: 1 / 4; }
+  .section-head .eyebrow { margin-bottom: 20px; }
+  .section-head h2 { font-size: clamp(32px, 4vw, 64px); text-wrap: balance; }
+  .section-head > p { grid-column: 4; color: var(--text-muted); font-size: 15.5px; }
+
+  /* Sample tiles */
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--border); overflow: hidden; }
+  .tile { position: relative; display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 210px; padding: 24px var(--pad) 28px;
+    border: 0; border-bottom: 1px solid var(--border); box-shadow: -1px 0 0 var(--border); background: transparent; color: inherit;
+    font: inherit; text-align: left; cursor: pointer; transition: background-color .2s; }
+  .tile:hover { background: var(--bg-card); }
+  .tile::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: var(--fmt, var(--text)); transform: scaleX(0); transform-origin: left; transition: transform .25s; }
+  .tile[aria-pressed="true"] { background: var(--bg-card); }
+  .tile[aria-pressed="true"]::before { transform: scaleX(1); }
+  .tile .label { display: flex; align-items: center; gap: 8px; margin-bottom: auto; }
+  .tile[aria-pressed="true"] .label { color: var(--text); }
+  .tile h3 { margin-top: 36px; font-size: clamp(19px, 1.5vw, 23px); font-weight: 700; font-stretch: 110%; letter-spacing: -0.03em; line-height: 1.15; }
+  .tile p { color: var(--text-muted); font-size: 14.5px; line-height: 1.5; }
+
+  /* Run controls */
+  .controls { border-bottom: 1px solid var(--border); }
+  .controls > * { padding-top: 28px; padding-bottom: 32px; }
+  .drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 172px; padding: 24px;
+    border: 1px dashed var(--border-strong); border-radius: 12px; text-align: center; cursor: pointer; transition: border-color .2s, background-color .2s; }
+  .drop:hover, .drop.dragging { border-color: var(--text); background: var(--bg-card); }
+  .drop.has-file { border-style: solid; border-color: var(--text); }
+  .drop svg { width: 26px; height: 26px; stroke: var(--text); }
+  .drop strong { font-size: 18px; font-weight: 600; font-stretch: 108%; letter-spacing: -0.02em; word-break: break-all; }
+  .drop span { color: var(--text-muted); font-size: 14px; }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 24px; align-content: start; }
+  .field label { display: block; margin-bottom: 10px; }
+  .field input { width: 100%; padding: 10px 0 12px; border: 0; border-bottom: 1px solid var(--border-strong); border-radius: 0; background: transparent;
+    color: var(--text); font: 500 18px/1.3 var(--sans); outline: none; transition: border-color .2s; }
+  .field input:focus { border-bottom-color: var(--text); }
+  .fields .run-row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; margin-top: 6px; }
+  .status { color: var(--text-muted); font-size: 14px; }
+  .error { color: var(--bad); }
+  .privacy { color: var(--text-muted); font: 500 11.5px/1.6 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+
+  /* Results */
+  .meta { margin-top: 18px; color: var(--text-muted); font: 500 12px/1.6 var(--mono); letter-spacing: .04em; word-break: break-all; }
+  .step { border-top: 1px solid var(--border); padding-top: 28px; padding-bottom: 8px; row-gap: 10px; align-items: baseline; }
+  .step h3 { grid-column: 2 / 4; font-size: clamp(22px, 2vw, 32px); font-weight: 700; font-stretch: 110%; letter-spacing: -0.035em; line-height: 1.1; }
+  .step > p:last-child { grid-column: 4; color: var(--text-muted); font-size: 15px; }
+  .arms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 20px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .arm { min-width: 0; padding: 26px var(--pad) 32px; border-left: 1px solid var(--border); }
+  .arm:first-child { border-left: 0; }
+  .arm-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; }
+  .arm-head .label { color: var(--text); }
+  .verdict { display: flex; align-items: flex-end; gap: 16px; margin-top: 18px; }
+  .count { font-size: clamp(72px, 8vw, 132px); font-weight: 800; font-stretch: 70%; line-height: .8; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .count.bad { color: var(--bad); }
+  .count-label { padding-bottom: 4px; color: var(--text-muted); font-size: 15px; line-height: 1.35; }
+  .facts { display: grid; grid-template-columns: minmax(0, 1fr) auto; margin-top: 26px; border-top: 1px solid var(--border); font-size: 14.5px; }
+  .facts dt, .facts dd { padding: 9px 0; border-bottom: 1px solid var(--border); }
+  .facts dt { color: var(--text-muted); }
+  .facts dd { text-align: right; font-family: var(--mono); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  .facts dd.note { grid-column: 1 / -1; padding-top: 0; text-align: left; color: var(--text-muted); font-family: var(--sans); }
+  .arm-links { display: flex; flex-wrap: wrap; gap: 14px 24px; margin-top: 22px; }
+  details.more { margin-top: 18px; border-top: 1px solid var(--border); }
+  details.more > summary { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 0 0; cursor: pointer; list-style: none;
+    color: var(--text-muted); font: 500 12px/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+  details.more > summary::-webkit-details-marker { display: none; }
+  details.more > summary::after { content: "+"; font: 400 18px/1 var(--mono); transition: transform .25s; }
+  details.more[open] > summary::after { transform: rotate(45deg); }
+  details.more > summary:hover { color: var(--text); }
+  pre.code { margin-top: 12px; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--code-bg);
+    color: var(--text); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+  table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 13.5px; }
+  th, td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+  th { color: var(--text-muted); font: 500 11px/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+  td.part { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+  td .sub { margin-top: 4px; color: var(--text-muted); font-size: 12.5px; }
+  .none { margin-top: 12px; color: var(--text-muted); font-size: 14px; }
+  .tag { display: inline-block; padding: 3px 8px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--text-muted);
+    font: 500 10.5px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+  .tag.unrel { border-color: color-mix(in srgb, var(--bad) 70%, transparent); color: var(--bad); }
+  .tag.eq { border-style: dashed; }
+
+  /* Page viewer: the original and each result, drawn by one renderer, changed pixels marked. */
+  .viewer { margin-top: 20px; border-top: 1px solid var(--border); }
+  .viewer-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 16px var(--pad) 0; }
+  .pages { display: flex; flex-wrap: wrap; gap: 8px; }
+  .page-btn { position: relative; min-width: 40px; height: 34px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 999px;
+    background: transparent; color: var(--text-muted); font: 500 12px/1 var(--mono); letter-spacing: .06em; cursor: pointer; transition: color .2s, border-color .2s; }
+  .page-btn:hover { color: var(--text); border-color: var(--text); }
+  .page-btn[aria-pressed="true"] { color: #0b0b0c; background: var(--text); border-color: var(--text); }
+  .page-btn.changed::after { content: ""; position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+  .toggle { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; color: var(--text-muted); font: 500 12px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; cursor: pointer; }
+  .toggle input { width: 16px; height: 16px; accent-color: var(--bad); }
+  .panes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 var(--pad); padding: 18px var(--pad) 4px; }
+  .pane { margin: 0; min-width: 0; }
+  .pane figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .pane figcaption .label { color: var(--text); }
+  .sheet { display: block; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg-card); }
+  .sheet canvas { display: block; width: 100%; height: auto; }
+  .sheet .empty { display: grid; place-items: center; aspect-ratio: 4 / 3; padding: 20px; color: var(--text-muted); font-size: 14px; text-align: center; }
+  .pane-note { margin-top: 10px; color: var(--text-muted); font-size: 14px; line-height: 1.45; }
+  .pane-note strong { color: var(--text); font-weight: 600; }
+  .pane-note.bad strong { color: var(--bad); }
+  .viewer-note { padding: 10px var(--pad) 0; color: var(--text-muted); font: 500 11.5px/1.6 var(--mono); letter-spacing: .04em; }
+
+  /* What's inside: counts a page render cannot show. Filled = kept, hollow red = lost, dashed = added. */
+  .inside { margin-top: clamp(28px, 3vw, 44px); padding: 0 var(--pad); }
+  .inside-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; }
+  .inside-head p:last-child { max-width: 620px; color: var(--text-muted); font-size: 14px; }
+  .inv { table-layout: fixed; }
+  .inv th:first-child { width: 28%; }
+  .inv td { font-size: 14px; }
+  .inv th .lost-sum { display: block; margin-top: 4px; color: var(--bad); letter-spacing: .04em; text-transform: none; }
+  .inv th .ok-sum { display: block; margin-top: 4px; color: var(--text-muted); letter-spacing: .04em; text-transform: none; }
+  .marks { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; vertical-align: middle; margin-right: 8px; }
+  .mk { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .mk.k { background: var(--text); }
+  .mk.l { box-shadow: inset 0 0 0 1.5px var(--bad); }
+  .mk.a { box-shadow: inset 0 0 0 1.5px var(--text-muted); opacity: .8; }
+  .num { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; vertical-align: middle; }
+  .num.lost { color: var(--bad); }
+  .num.of { margin-left: 6px; color: var(--text-muted); }
+
+  /* Explainer columns */
+  .cols { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .cols > div { display: flex; flex-direction: column; gap: 16px; padding-top: clamp(32px, 4vw, 56px); padding-bottom: clamp(36px, 4.6vw, 64px); border-left: 1px solid var(--border); }
+  .cols > div:first-child { border-left: 0; }
+  .cols h3 { font-size: clamp(20px, 1.7vw, 26px); font-weight: 700; font-stretch: 110%; letter-spacing: -0.03em; line-height: 1.12; }
+  .cols p { color: var(--text-muted); font-size: 15.5px; }
+  .cols .tag { align-self: flex-start; }
+
+  .verify { padding-top: clamp(32px, 4vw, 56px); padding-bottom: clamp(32px, 4vw, 56px); row-gap: 24px; border-bottom: 1px solid var(--border); }
+  .verify .prose { color: var(--text-muted); font-size: 15.5px; }
+  .verify .prose p + p { margin-top: 14px; }
+  .verify pre.code { margin-top: 0; font-size: 13px; }
+
+  .closing { padding-top: var(--section); padding-bottom: var(--section); row-gap: 28px; }
+  .closing h2 { grid-column: 1 / 4; font-size: clamp(38px, 4.6vw, 80px); text-wrap: balance; }
+  .closing > :not(h2) { grid-column: 1 / 3; }
+
+  .foot { padding: clamp(40px, 5vw, 64px) var(--pad) 32px; border-top: 1px solid transparent; border-image: var(--site-rule) 1; }
+  .foot-in { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 32px; }
+  .foot-claim { margin-top: 18px; max-width: 360px; font-size: 14px; font-weight: 500; }
+  .foot nav { display: grid; grid-template-columns: repeat(2, auto); gap: 10px 40px; align-content: start; }
+  .foot nav a { color: var(--text-muted); font: 500 12px/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; transition: color .2s; }
+  .foot nav a:hover { color: var(--text); }
+  .copy { margin-top: 44px; color: var(--text-muted); font: 500 11px/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+
+  @media (max-width: 1100px) {
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 860px) {
+    :root { --section: 80px; }
+    .quarters { grid-template-columns: minmax(0, 1fr); }
+    .quarters > * { grid-column: 1 / -1 !important; }
+    .cells > div, .cols > div { border-left: 0; border-top: 1px solid var(--border); gap: 10px; }
+    .cells > div:first-child, .cols > div:first-child { border-top: 0; }
+    .tiles { grid-template-columns: minmax(0, 1fr); }
+    .tile { min-height: 0; }
+    .tile h3 { margin-top: 14px; }
+    .controls > :first-child { padding-bottom: 0; }
+    .fields { grid-template-columns: minmax(0, 1fr); }
+    .arms { grid-template-columns: minmax(0, 1fr); }
+    .arm { border-left: 0; border-top: 1px solid var(--border); }
+    .arm:first-child { border-top: 0; }
+    .panes { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-in">
+    <a class="logo" href="https://wolfsdk.com/" aria-label="WolfSDK home">
+      <svg viewBox="350 184 545 670" aria-hidden="true" focusable="false"><path d="M480 216 L639 400 L639 478 L520 552 L598 821 L382 578 L434 476 Z"/><path d="M817 216 L660 353 L808 439 Z"/><path d="M652 365 L808 458 L824 537 L813 605 L863 753 L827 785 L783 785 L547 551 L652 485 Z"/></svg>
+      WolfSDK
+    </a>
+    <nav class="nav" aria-label="WolfSDK site">
+      <a href="https://wolfsdk.com/wolfxl"><span class="dot xlsx"></span>WolfXL</a>
+      <a href="https://wolfsdk.com/wolfppt"><span class="dot pptx"></span>WolfPPT</a>
+      <a href="https://wolfsdk.com/wolfdocx"><span class="dot docx"></span>WolfDocx</a>
+      <a href="https://wolfsdk.com/runtime">Wolf Runtime</a>
+      <a href="https://wolfsdk.com/compare">Compare</a>
+      <a href="https://wolfsdk.com/pricing">Pricing</a>
+      <a class="btn btn-primary btn-sm" href="mailto:wolfgang@synthgl.com?subject=WolfSDK%20beta">Get beta access</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero quarters">
+    <div class="scene" aria-hidden="true"></div>
+    <p class="eyebrow span-all">Live preservation check / XLSX / DOCX / PPTX</p>
+    <h1>What survives a save? <em>Check it on your own file.</em></h1>
+    <p class="lede">An agent that edits an Office file has to open it and save it again. Everything it did not mean to touch should come back unchanged: comments, tracked changes, charts, custom XML, document properties. This page saves your file with WolfSDK and with the tools agents usually reach for, then compares every part with the original.</p>
+    <div class="actions span-all">
+      <a class="btn btn-primary" href="#check">Run a check <span aria-hidden="true">&darr;</span></a>
+      <a class="link" href="/verify.py">Get the checker, verify.py</a>
+    </div>
+  </section>
+
+  <section class="cells quarters" aria-label="What this server runs">
+    <div><p class="label">WolfSDK</p><div><p class="cell-value" id="c-wolf">&nbsp;</p><p class="cell-note" id="c-wolf-note">&nbsp;</p></div></div>
+    <div><p class="label">Compared with</p><div><p class="cell-value" id="c-lo">&nbsp;</p><p class="cell-note" id="c-lo-note">&nbsp;</p></div></div>
+    <div><p class="label">Edit baseline</p><div><p class="cell-value">openpyxl, python-docx, python-pptx</p><p class="cell-note">The library an agent usually picks for each format, used the careful way.</p></div></div>
+    <div><p class="label">Your file</p><div><p class="cell-value">Deleted after the run</p><p class="cell-note" id="c-privacy">Results stay downloadable for a short time. Names and contents are not logged.</p></div></div>
+  </section>
+
+  <section id="check" aria-labelledby="run-title">
+    <div class="section-head quarters">
+      <div><p class="eyebrow">01 / Choose a file</p><h2 id="run-title">Pick a sample <em>or drop in your own.</em></h2></div>
+      <p>Each run saves the file twice: once with no edit, once replacing one piece of text.</p>
+    </div>
+    <div class="tiles" id="samples" role="group" aria-label="Sample files"></div>
+    <div class="controls quarters">
+      <div class="span-2">
+        <label class="drop" id="drop" for="file">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
+          <strong id="drop-title">Drop an .xlsx, .docx or .pptx here</strong>
+          <span id="drop-note">or choose a file, 20 MB max</span>
+        </label>
+        <input class="sr-only" type="file" id="file" accept=".xlsx,.docx,.pptx">
+      </div>
+      <div class="fields span-2">
+        <div class="field"><label class="label" for="find">Find (literal text in the file)</label><input type="text" id="find" maxlength="200" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label class="label" for="replace">Replace with</label><input type="text" id="replace" maxlength="200" autocomplete="off" spellcheck="false"></div>
+        <div class="run-row">
+          <button class="btn btn-primary" id="run" type="button">Run the check</button>
+          <p class="status" id="status" aria-live="polite"></p>
+        </div>
+        <p class="privacy" id="privacy" style="grid-column: 1 / -1"></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="results" aria-labelledby="results-title" hidden>
+    <div class="section-head quarters">
+      <div><p class="eyebrow">02 / Results</p><h2 id="results-title"></h2><p class="meta" id="filemeta"></p></div>
+      <p>An unrelated change is a part removed, added, or altered that the operation had no reason to touch.</p>
+    </div>
+    <div class="step quarters"><p class="label">Step 1</p><h3>Open and save, no edit</h3><p>WolfSDK and LibreOffice, the headless converter most agent sandboxes ship.</p></div>
+    <div class="viewer" id="roundtrip-view"></div>
+    <div class="inside" id="roundtrip-inside"></div>
+    <div class="arms" id="roundtrip"></div>
+    <div id="editwrap">
+      <div class="step quarters" style="margin-top: clamp(40px, 5vw, 72px)"><p class="label">Step 2</p><h3>Replace one piece of text</h3><p id="editnote"></p></div>
+      <div class="viewer" id="edit-view"></div>
+      <div class="inside" id="edit-inside"></div>
+      <div class="arms" id="edit"></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="read-title">
+    <div class="section-head quarters">
+      <div><p class="eyebrow">How to read this</p><h2 id="read-title">Every part, compared <em>byte for byte.</em></h2></div>
+      <p>An Office file is a ZIP package of parts. Each part of a result is compared with the same part of the original after decompression.</p>
+    </div>
+    <div class="cols quarters">
+      <div><span class="tag">expected</span><h3>The operation had a reason to write it.</h3><p>The part holding the replaced text, or, for a spreadsheet save, formula cells that recalculate.</p></div>
+      <div><span class="tag eq">rewritten, same content</span><h3>Different bytes, same document.</h3><p>XML that canonicalizes to the same document, relationship entries in another order, or a worksheet whose cell values are all unchanged.</p></div>
+      <div><span class="tag unrel">unrelated change</span><h3>Anything else.</h3><p>A part removed, added, or altered that the operation had no reason to touch. This is the number at the top of each result.</p></div>
+      <div><p class="label">Identical</p><h3>Not listed.</h3><p>Parts that come back byte-identical are counted, not shown. A whole file can come back identical.</p></div>
+    </div>
+    <div class="verify quarters">
+      <div class="span-2 prose">
+        <p class="label" style="margin-bottom: 16px">Check it yourself</p>
+        <p>Download any result and run the same comparison on your machine with <a href="/verify.py">verify.py</a>, which needs only the Python standard library. Recount what is inside a file with <a href="/inventory.py">inventory.py</a>, which sits next to it.</p>
+        <p>Each result lists the exact command behind it. The LibreOffice column reruns anywhere LibreOffice is installed, and the Python-library column reruns with <a href="/baselines.py">baselines.py</a> (<code>pip install openpyxl==3.1.5 python-docx==1.2.0 python-pptx==1.0.2</code>). <span id="footprint"></span></p>
+      </div>
+      <div class="span-2"><pre class="code">python3 verify.py roundtrip original.docx result.docx
+python3 verify.py edit original.docx result.docx \
+  --find "30 days" --replace "45 days"</pre></div>
+    </div>
+  </section>
+
+  <section class="closing quarters">
+    <h2>Run it on your document set. <em>WolfSDK is in private beta for agent builders.</em></h2>
+    <p class="lede">For the binary, the Python SDK, or a run across your own files, email <a class="prose" href="mailto:wolfgang@synthgl.com" style="text-decoration: underline; text-underline-offset: 4px">wolfgang@synthgl.com</a>.</p>
+    <div class="actions">
+      <a class="btn btn-primary" href="mailto:wolfgang@synthgl.com?subject=WolfSDK%20beta">Get beta access</a>
+      <a class="link" href="https://wolfsdk.com/">Visit wolfsdk.com</a>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="foot-in">
+    <div>
+      <a class="logo" href="https://wolfsdk.com/" aria-label="WolfSDK home">
+        <svg viewBox="350 184 545 670" aria-hidden="true" focusable="false"><path d="M480 216 L639 400 L639 478 L520 552 L598 821 L382 578 L434 476 Z"/><path d="M817 216 L660 353 L808 439 Z"/><path d="M652 365 L808 458 L824 537 L813 605 L863 753 L827 785 L783 785 L547 551 L652 485 Z"/></svg>
+        WolfSDK
+      </a>
+      <p class="foot-claim">The Office kernel for AI agents. Evidence-backed claims.</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="https://wolfsdk.com/compare">Compare</a>
+      <a href="https://wolfsdk.com/pricing">Pricing</a>
+      <a href="https://wolfsdk.com/libreoffice-headless-alternative">LibreOffice alternative</a>
+      <a href="https://wolfsdk.com/security">Security</a>
+      <a href="https://wolfsdk.com/faq">FAQ</a>
+      <a href="https://wolfsdk.com/privacy">Privacy</a>
+    </nav>
+  </div>
+  <p class="copy">&copy; 2026 SynthGL, Inc. All rights reserved.</p>
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const mb = (n) => n < 1048576 ? Math.max(1, Math.round(n / 1024)) + " KB" : (n / 1048576).toFixed(1) + " MB";
+const extOf = (name) => (String(name).match(/\.(xlsx|docx|pptx)$/i) || [, ""])[1].toLowerCase();
+const FMT = { xlsx: "var(--fmt-xl)", docx: "var(--fmt-docx)", pptx: "var(--fmt-ppt)" };
+let samples = [], chosen = null, maxMb = 20;
+
+function choose(name) {
+  chosen = name;
+  for (const b of document.querySelectorAll(".tile")) b.setAttribute("aria-pressed", String(b.dataset.file === name));
+  const s = samples.find((x) => x.file === name);
+  if (s) { $("find").value = s.find; $("replace").value = s.replace; clearFile(); }
+}
+
+function clearFile() {
+  $("file").value = "";
+  $("drop").classList.remove("has-file");
+  $("drop-title").textContent = "Drop an .xlsx, .docx or .pptx here";
+  $("drop-note").textContent = `or choose a file, ${maxMb} MB max`;
+}
+
+function useFile(file) {
+  chosen = null;
+  for (const b of document.querySelectorAll(".tile")) b.setAttribute("aria-pressed", "false");
+  $("find").value = ""; $("replace").value = "";
+  $("drop").classList.add("has-file");
+  $("drop-title").textContent = file.name;
+  $("drop-note").textContent = `${mb(file.size)}. Add text to find, or run with no edit step.`;
+}
+
+async function init() {
+  const info = await (await fetch("/api/info")).json();
+  samples = info.samples;
+  $("samples").innerHTML = samples.map((s, i) => {
+    const ext = extOf(s.file);
+    const title = s.title.replace(/\s*\((XLSX|DOCX|PPTX)\)$/, "");
+    return `<button type="button" class="tile" style="--fmt:${FMT[ext] || "var(--text)"}" data-file="${esc(s.file)}" aria-pressed="false">
+      <span class="label"><span class="dot ${ext}"></span>${String(i + 1).padStart(2, "0")} / ${ext.toUpperCase()}</span>
+      <h3>${esc(title)}</h3><p>${esc(s.has)}</p></button>`;
+  }).join("");
+  for (const b of document.querySelectorAll(".tile")) b.onclick = () => choose(b.dataset.file);
+  maxMb = info.limits.max_upload_mb;
+  choose(samples[0].file);
+  const ttl = info.limits.output_ttl_minutes;
+  $("privacy").textContent = `Uploads are deleted when the run finishes. Results stay downloadable for ${ttl} minutes. File names and contents are not logged.`;
+  $("c-privacy").textContent = `Results stay downloadable for ${ttl} minutes, then are deleted. Names and contents are not logged.`;
+  const t = info.tools;
+  const ver = (s) => String(s).replace(/\s*\(.*$/, "").split(" ").slice(0, 2).join(" ");
+  $("c-wolf").textContent = `One ${mb(t.wolf_binary_bytes)} binary`;
+  $("c-wolf-note").textContent = `${ver(t.wolf)}, no other runtime.`;
+  $("c-lo").textContent = ver(t.libreoffice);
+  $("c-lo-note").textContent = `Headless, ${mb(t.libreoffice_install_bytes)} installed.`;
+  $("footprint").textContent = `This server runs ${t.wolf} (one ${mb(t.wolf_binary_bytes)} binary, no other runtime) and ${t.libreoffice} (${mb(t.libreoffice_install_bytes)} installed).`;
+  $("file").onchange = () => { if ($("file").files.length) useFile($("file").files[0]); };
+  const drop = $("drop");
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("dragging"); };
+  drop.ondragleave = () => drop.classList.remove("dragging");
+  drop.ondrop = (e) => {
+    e.preventDefault(); drop.classList.remove("dragging");
+    const f = e.dataTransfer.files[0];
+    if (!f) return;
+    const dt = new DataTransfer(); dt.items.add(f); $("file").files = dt.files; useFile(f);
+  };
+}
+
+function tagFor(p) {
+  if (p.related) return '<span class="tag">expected</span>';
+  if (p.equivalent) return '<span class="tag eq">rewritten, same content</span>';
+  return '<span class="tag unrel">unrelated change</span>';
+}
+
+function card(arm, mode) {
+  const d = arm.diff;
+  if (!arm.saved || !d) {
+    return `<article class="arm"><div class="arm-head"><p class="label">${esc(arm.label)}</p></div>
+      <div class="verdict"><p class="count bad">&times;</p><p class="count-label">no result<br>(exit ${esc(arm.exit)})</p></div>
+      <pre class="code">${esc(arm.detail || "no output")}</pre>
+      <details class="more"><summary>Command</summary><pre class="code">${esc(arm.command)}</pre></details></article>`;
+  }
+  const n = d.unrelated_content_changes;
+  const facts = [
+    ["Byte-identical parts", `${d.identical_parts} of ${d.source_parts}`],
+    ["Whole file identical", arm.byte_identical_file ? "yes" : "no"],
+    ["Parts removed", d.unrelated_removed], ["Parts added", d.unrelated_added],
+    ["Rewritten, same content", d.rewritten_without_content_change],
+    ["Expected changes", d.related_parts_changed],
+  ];
+  if (mode === "edit") facts.push(["Find text left", `${d.find_occurrences_after} of ${d.find_occurrences_before}`]);
+  facts.push(["Time", `${arm.seconds} s`]);
+  const notes = arm.detail && arm.detail !== "succeeded" ? `<dt>Notes</dt><dd></dd><dd class="note">${esc(arm.detail)}</dd>` : "";
+  const rows = d.parts.map((p) => `<tr><td class="part">${esc(p.part)}</td><td>${esc(p.status)}</td><td>${tagFor(p)}${p.note || p.equivalent ? `<div class="sub">${esc(p.note || p.equivalent)}</div>` : ""}</td></tr>`).join("");
+  return `<article class="arm">
+    <div class="arm-head"><p class="label">${esc(arm.label)}</p>${arm.byte_identical_file ? '<span class="tag">identical file</span>' : ""}</div>
+    <div class="verdict"><p class="count ${n === 0 ? "" : "bad"}">${n}</p><p class="count-label">unrelated part<br>change${n === 1 ? "" : "s"}</p></div>
+    <dl class="facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}${notes}</dl>
+    ${arm.download ? `<div class="arm-links"><a class="link" href="${esc(arm.download)}">Download result &darr;</a></div>` : ""}
+    <details class="more" ${d.parts.length && d.parts.length <= 6 ? "open" : ""}><summary>Changed parts (${d.parts.length})</summary>
+      ${d.parts.length ? `<table><thead><tr><th>Part</th><th>Change</th><th>Class</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="none">None. Every part is byte-identical.</p>'}</details>
+    <details class="more" ${arm.code || arm.ops ? "open" : ""}><summary>What ran</summary><pre class="code">${esc(arm.command)}</pre>${arm.ops ? `<p class="label" style="margin-top: 14px">wolf-ops.json</p><pre class="code">${esc(JSON.stringify(arm.ops, null, 2))}</pre>` : ""}${arm.code ? `<p class="label" style="margin-top: 14px">baselines.py, the code that ran</p><pre class="code" style="white-space: pre; word-break: normal">${esc(arm.code)}</pre>` : ""}</details>
+  </article>`;
+}
+
+const shortName = (label) => String(label).replace(/\s+\d[\w.]*$/, "");
+const countOf = (arm) => arm.saved && arm.diff ? String(arm.diff.unrelated_content_changes) : "no result";
+
+// One renderer draws every file, so comparing pixels compares the files. Same-origin PNGs keep the canvas readable.
+const pixelCache = new Map();
+function pixels(url) {
+  if (!pixelCache.has(url)) pixelCache.set(url, new Promise((ok, fail) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+      ok(ctx.getImageData(0, 0, c.width, c.height));
+    };
+    img.onerror = () => fail(new Error("preview did not load"));
+    img.src = url;
+  }));
+  return pixelCache.get(url);
+}
+
+const TILE = 16;
+function compare(a, b) {
+  const { width: w, height: h } = b;
+  const tiles = new Set();
+  let changed = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    let d = 765;
+    if (x < a.width && y < a.height) {
+      const j = (y * a.width + x) * 4;
+      d = Math.abs(a.data[j] - b.data[i]) + Math.abs(a.data[j + 1] - b.data[i + 1]) + Math.abs(a.data[j + 2] - b.data[i + 2]);
+    }
+    if (d > 24) { changed++; tiles.add(((y / TILE) | 0) * 100000 + ((x / TILE) | 0)); }
+  }
+  return { changed, ratio: changed / (w * h), tiles, resized: a.width !== w || a.height !== h };
+}
+
+function paint(canvas, img, diff, highlight) {
+  canvas.width = img.width; canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  ctx.putImageData(img, 0, 0);
+  if (!highlight || !diff || !diff.changed) return;
+  ctx.fillStyle = "rgba(5, 5, 6, 0.55)";
+  ctx.fillRect(0, 0, img.width, img.height);
+  for (const t of diff.tiles) {
+    const x = (t % 100000) * TILE, y = Math.floor(t / 100000) * TILE;
+    ctx.putImageData(img, 0, 0, x, y, TILE, TILE);
+    ctx.fillStyle = "rgba(255, 107, 94, 0.28)";
+    ctx.fillRect(x, y, TILE, TILE);
+  }
+}
+
+const amount = (d) => d.ratio < 0.0001 ? `${d.changed.toLocaleString("en-US")} pixel${d.changed === 1 ? "" : "s"} differ${d.changed === 1 ? "s" : ""}` : `${(d.ratio * 100).toFixed(d.ratio < 0.01 ? 2 : 1)}% of the page differs`;
+
+function marks(before, after) {
+  if (after === null) return '<span class="num of">no result</span>';
+  if (before > 12 || after > 12) {
+    if (after === before) return `<span class="num">${after.toLocaleString("en-US")}</span>`;
+    return `<span class="num ${after < before ? "lost" : ""}">${after.toLocaleString("en-US")}</span> <span class="num of">was ${before.toLocaleString("en-US")}</span>`;
+  }
+  const kept = Math.min(before, after), lost = Math.max(before - after, 0), added = Math.max(after - before, 0);
+  const dots = '<span class="mk k"></span>'.repeat(kept) + '<span class="mk l" title="lost"></span>'.repeat(lost) + '<span class="mk a" title="added"></span>'.repeat(added);
+  const label = lost ? `<span class="num lost">${after}</span> <span class="num of">was ${before}</span>`
+    : added ? `<span class="num">${after}</span> <span class="num of">was ${before}</span>` : `<span class="num">${after}</span>`;
+  return `${dots ? `<span class="marks">${dots}</span>` : ""}${label}`;
+}
+
+function inside(el, original, arms, edit = false) {
+  const counts = arms.map((a) => a.saved && a.inventory ? Object.fromEntries(a.inventory.map((f) => [f.feature, f.count])) : null);
+  const differs = (f) => counts.some((c) => c && c[f.feature] !== f.count);
+  const shownRows = original.filter((f) => f.count > 0 || differs(f));
+  const changed = shownRows.filter(differs), same = shownRows.filter((f) => !differs(f));
+  const lostKinds = counts.map((c) => c ? original.filter((f) => c[f.feature] < f.count).length : null);
+  const row = (f) => `<tr><td>${esc(f.feature)}</td><td>${marks(f.count, f.count)}</td>${counts.map((c) => `<td>${marks(f.count, c ? c[f.feature] : null)}</td>`).join("")}</tr>`;
+  const head = `<thead><tr><th>Feature</th><th>Original</th>${arms.map((a, k) => `<th>${esc(shortName(a.label))}${lostKinds[k] === null ? "" : lostKinds[k] ? `<span class="lost-sum">loses items from ${lostKinds[k]} feature${lostKinds[k] === 1 ? "" : "s"}</span>` : '<span class="ok-sum">loses nothing counted</span>'}</th>`).join("")}</tr></thead>`;
+  el.innerHTML = `<div class="inside-head"><p class="label">What's inside each file</p>
+      <p>Things a page does not show, counted in every file by <a class="prose" href="/inventory.py" style="text-decoration: underline; text-underline-offset: 4px">inventory.py</a>. Hollow red marks are items the original had and the result does not${edit ? "; a text edit has no reason to change any count" : ""}.</p></div>
+    ${!shownRows.length ? '<p class="none">None of the counted features appear in this file.</p>'
+      : changed.length ? `<table class="inv">${head}<tbody>${changed.map(row).join("")}</tbody></table>`
+      : `<table class="inv">${head}</table><p class="none">Every counted feature matches the original in every result.</p>`}
+    ${same.length ? `<details class="more"${changed.length ? "" : " open"}><summary>${same.length} feature${same.length === 1 ? "" : "s"} unchanged everywhere</summary><table class="inv"><tbody>${same.map(row).join("")}</tbody></table></details>` : ""}`;
+}
+
+async function viewer(el, original, arms, label, edit = false) {
+  if (!original.length) {
+    el.innerHTML = `<p class="viewer-note">WolfRender could not draw this file, so there is no page preview. The part comparison below still applies.</p>`;
+    return;
+  }
+  const shown = arms.filter((a) => a.saved);
+  const pages = original.map((_, i) => i);
+  // Compare every page up front: mark pages with a change and open the first one.
+  const diffs = await Promise.all(pages.map((p) => Promise.all(shown.map(async (a) => {
+    if (!a.preview[p]) return { missing: true };
+    try { return compare(await pixels(original[p]), await pixels(a.preview[p])); } catch { return { missing: true }; }
+  }))));
+  const changedPage = (p) => diffs[p].some((d) => d.missing || d.changed);
+  let page = Math.max(0, pages.findIndex(changedPage));
+  const id = el.id;
+  el.innerHTML = `<div class="viewer-bar">
+      <div class="pages" role="group" aria-label="${esc(label)} pages"${original.length > 1 ? "" : " hidden"}>${pages.map((p) => `<button type="button" class="page-btn${changedPage(p) ? " changed" : ""}" data-page="${p}" aria-pressed="false" title="${changedPage(p) ? "Something on this page changed" : "No visible change on this page"}">Page ${p + 1}</button>`).join("")}</div>
+      <label class="toggle"><input type="checkbox" id="${id}-hl" checked> Highlight changes</label>
+    </div>
+    <div class="panes">
+      <figure class="pane"><figcaption><span class="label">Original</span><a class="link" id="${id}-o-open" target="_blank" rel="noopener">Full size</a></figcaption><div class="sheet"><canvas id="${id}-o"></canvas></div><p class="pane-note">As uploaded.</p></figure>
+      ${shown.map((a, k) => `<figure class="pane"><figcaption><span class="label">${esc(shortName(a.label))}</span><a class="link" id="${id}-${k}-open" target="_blank" rel="noopener">Full size</a></figcaption><div class="sheet" id="${id}-${k}-sheet"></div><p class="pane-note" id="${id}-${k}-note"></p></figure>`).join("")}
+    </div>
+    <p class="viewer-note">${edit ? "The edit should change the replaced text and nothing else. " : "A save with no edit should change nothing. "}Every column is drawn by WolfRender, the renderer inside WolfSDK, at the same size, so a marked area is a change in the file itself. ${original.length >= 4 ? "First four pages shown. " : ""}Download a result below to open it in Office.</p>`;
+  const draw = async () => {
+    const hl = $(`${id}-hl`).checked;
+    for (const b of el.querySelectorAll(".page-btn")) b.setAttribute("aria-pressed", String(Number(b.dataset.page) === page));
+    const base = await pixels(original[page]);
+    paint($(`${id}-o`), base, null, false);
+    $(`${id}-o-open`).href = original[page];
+    for (const [k, a] of shown.entries()) {
+      const d = diffs[page][k], sheet = $(`${id}-${k}-sheet`), note = $(`${id}-${k}-note`), open = $(`${id}-${k}-open`);
+      if (d.missing) {
+        sheet.innerHTML = `<div class="empty">${a.preview.length ? `This result has ${a.preview.length} page${a.preview.length === 1 ? "" : "s"}; there is no page ${page + 1}.` : "WolfRender could not draw this result."}</div>`;
+        note.className = "pane-note bad"; note.innerHTML = "<strong>Page missing.</strong>"; open.hidden = true;
+        continue;
+      }
+      open.hidden = false; open.href = a.preview[page];
+      if (!sheet.firstElementChild || sheet.firstElementChild.tagName !== "CANVAS") sheet.innerHTML = "<canvas></canvas>";
+      paint(sheet.firstElementChild, await pixels(a.preview[page]), d, hl);
+      note.className = d.changed && !edit ? "pane-note bad" : "pane-note";
+      note.innerHTML = d.changed
+        ? `<strong>${amount(d)}</strong> from the original${d.resized ? ", and the page size changed" : ""}.`
+        : "<strong>Same pixels</strong> as the original.";
+    }
+  };
+  for (const b of el.querySelectorAll(".page-btn")) b.onclick = () => { page = Number(b.dataset.page); draw(); };
+  $(`${id}-hl`).onchange = draw;
+  await draw();
+}
+
+async function run() {
+  setStatus("");
+  const form = new FormData();
+  if ($("file").files.length) form.append("file", $("file").files[0]);
+  else if (chosen) form.append("sample", chosen);
+  else { setStatus("Pick a sample or upload a file.", true); return; }
+  form.append("find", $("find").value);
+  form.append("replace", $("replace").value);
+  $("run").disabled = true; $("run").textContent = "Running";
+  setStatus("Saving with each tool and comparing every part. This takes a few seconds.");
+  try {
+    const res = await fetch("/api/run", { method: "POST", body: form });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) { setStatus(body.detail || `Request failed (${res.status})`, true); return; }
+    setStatus("");
+    render(body);
+  } catch (e) { setStatus(String(e), true); }
+  finally { $("run").disabled = false; $("run").textContent = "Run the check"; }
+}
+
+function setStatus(msg, isError = false) { $("status").textContent = msg; $("status").classList.toggle("error", isError); }
+
+function render(r) {
+  $("results").hidden = false;
+  $("filemeta").textContent = `${r.file} / ${mb(r.bytes)} / ${r.parts} parts / sha256 ${r.sha256.slice(0, 16)}`;
+  const [wolf, lo] = r.roundtrip;
+  const others = [lo, ...(r.edit ? [r.edit.arms[1]] : [])].map((a) => `${shortName(a.label)}: ${countOf(a)}.`).join(" ");
+  $("results-title").innerHTML = `${esc(shortName(wolf.label))}: ${esc(countOf(wolf))} unrelated changes. <em>${esc(others)}</em>`;
+  $("roundtrip").innerHTML = r.roundtrip.map((a) => card(a, "roundtrip")).join("");
+  pixelCache.clear();
+  const failed = (el) => (e) => { el.innerHTML = `<p class="viewer-note">Page previews did not load: ${esc(e.message || e)}</p>`; };
+  viewer($("roundtrip-view"), r.previews, r.roundtrip, "Open and save").catch(failed($("roundtrip-view")));
+  inside($("roundtrip-inside"), r.inventory, r.roundtrip);
+  if (r.edit) {
+    $("editwrap").hidden = false;
+    const lib = r.edit.arms[1].label;
+    $("editnote").textContent = `Replace "${r.edit.find}" with "${r.edit.replace}". WolfSDK and ${lib}, used the careful way: replace inside each run or cell, then save.`;
+    $("edit").innerHTML = r.edit.arms.map((a) => card(a, "edit")).join("");
+    viewer($("edit-view"), r.previews, r.edit.arms, "Replace text", true).catch(failed($("edit-view")));
+    inside($("edit-inside"), r.inventory, r.edit.arms, true);
+  } else {
+    $("editwrap").hidden = true;
+  }
+  $("results").scrollIntoView({ behavior: "smooth" });
+}
+
+$("run").onclick = run;
+init().catch((e) => setStatus("Could not load the demo: " + e, true));
+</script>
+</body>
+</html>

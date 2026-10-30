@@ -1,0 +1,21 @@
+[Unit]
+Description=WolfSDK hosted demo (what survives a save)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Restart=always
+RestartSec=5
+ExecStartPre=-/usr/bin/docker rm -f wolf-demo
+ExecStart=/usr/bin/docker run --rm --name wolf-demo --network @NETWORK@ \
+  --memory 2g --memory-swap 2g --cpus 2 --pids-limit 512 \
+  --read-only --tmpfs /tmp:rw,size=1g --tmpfs /home/demo:rw,size=64m \
+  --security-opt no-new-privileges --cap-drop ALL \
+  wolf-demo:latest
+ExecStop=/usr/bin/docker stop wolf-demo
+TimeoutStartSec=120
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
