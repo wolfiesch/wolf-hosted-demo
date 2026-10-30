@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Hosted demo: what an Office save keeps, Wolf vs LibreOffice and the common Python libraries"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi==0.115.12",
+    "fastapi==0.162.0",
     "uvicorn==0.34.2",
     "python-multipart==0.0.31",
     "openpyxl==3.1.5",
